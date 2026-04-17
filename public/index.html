@@ -138,12 +138,6 @@
       ></div>
     </section>
 
-    <!-- Read-only notice -->
-    <section id="readonly-banner" class="bg-panel border border-edge rounded-xl p-4 mb-6 hidden">
-      <div class="text-sm text-neutral-300">
-        This instance is in <span class="text-amber-400">read-only</span> mode. Search only.
-      </div>
-    </section>
 
     <!-- Search panel -->
     <section class="bg-panel border border-edge rounded-xl p-5 mb-6">
@@ -244,8 +238,6 @@
       const readOnly = !!SERVER_CONFIG.read_only;
       const adminRequired = !!SERVER_CONFIG.admin_required;
       const hasAuth = !!localStorage.getItem(AUTH_KEY);
-
-      $('#readonly-banner').classList.toggle('hidden', !readOnly);
 
       if (readOnly) {
         $('#ingest-panel').classList.add('hidden');
