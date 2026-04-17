@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>yt-channel-search</title>
+  <title>White Devil</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -67,7 +67,7 @@
           </svg>
         </div>
         <div>
-          <h1 class="text-2xl font-semibold tracking-tight">yt-channel-search</h1>
+          <h1 class="text-2xl font-semibold tracking-tight">White Devil</h1>
           <p class="text-sm text-neutral-400">Full-text search across a YouTube channel's transcripts.</p>
         </div>
       </div>
@@ -185,13 +185,13 @@
     </section>
 
     <!-- Indexed channels list -->
-    <section class="mt-10">
+    <section id="channels-section" class="mt-10">
       <h2 class="text-sm font-medium text-neutral-400 mb-3">Indexed channels</h2>
       <div id="channels-list" class="space-y-2"></div>
     </section>
 
-    <footer class="mt-12 pt-6 border-t border-edge text-xs text-neutral-500 flex justify-between">
-      <div>yt-channel-search · SQLite FTS5</div>
+    <footer id="app-footer" class="mt-12 pt-6 border-t border-edge text-xs text-neutral-500 flex justify-between">
+      <div>White Devil</div>
       <div><span id="footer-videos">0</span> videos · <span id="footer-segments">0</span> segments indexed</div>
     </footer>
   </div>
@@ -238,6 +238,12 @@
       const readOnly = !!SERVER_CONFIG.read_only;
       const adminRequired = !!SERVER_CONFIG.admin_required;
       const hasAuth = !!localStorage.getItem(AUTH_KEY);
+
+      const hideWhenReadOnly = ['#totals', '#channels-section', '#app-footer'];
+      hideWhenReadOnly.forEach(sel => {
+        const el = document.querySelector(sel);
+        if (el) el.classList.toggle('hidden', readOnly);
+      });
 
       if (readOnly) {
         $('#ingest-panel').classList.add('hidden');
