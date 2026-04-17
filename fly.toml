@@ -1,0 +1,25 @@
+app = "yt-channel-search"
+primary_region = "ord"
+
+[build]
+
+[env]
+  PORT = "3000"
+  # READ_ONLY is the hard killswitch. Set as a secret when needed:
+  #   fly secrets set READ_ONLY=true   # block everything, even admin
+  #   fly secrets unset READ_ONLY      # normal operation (admin still needs auth)
+
+[[mounts]]
+  source = "data"
+  destination = "/app/data"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

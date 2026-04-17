@@ -1,0 +1,11 @@
+node_modules
+npm-debug.log
+.env
+.env.*
+data
+models
+*.rss
+.git
+.gitignore
+.DS_Store
+README.md

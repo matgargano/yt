@@ -1,0 +1,807 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>yt-channel-search</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            yt: '#FF0000',
+            ink: '#0b0b0e',
+            panel: '#141418',
+            edge: '#26262c',
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    html, body { background: #0b0b0e; color: #e7e7ea; }
+    body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    mark { background: rgba(255, 0, 0, 0.25); color: #fff; padding: 0 2px; border-radius: 2px; }
+    .log { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+    .scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+    .scroll-thin::-webkit-scrollbar-thumb { background: #2a2a31; border-radius: 4px; }
+    .scroll-thin::-webkit-scrollbar-track { background: transparent; }
+    .fade-mask {
+      mask-image: linear-gradient(to bottom, black 85%, transparent);
+      -webkit-mask-image: linear-gradient(to bottom, black 85%, transparent);
+    }
+    .player-frame { aspect-ratio: 16 / 9; width: 100%; display: block; }
+    #player-wrap { max-width: 720px; margin-left: auto; margin-right: auto; }
+    .quote-row {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 12px;
+      align-items: baseline;
+      padding: 8px 12px;
+      border-radius: 6px;
+    }
+    .quote-row:hover { background: rgba(255, 255, 255, 0.03); }
+    .ts-link {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12.5px;
+      color: #60a5fa;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .ts-link:hover { color: #93c5fd; }
+    .quote-text { font-size: 13.5px; line-height: 1.55; color: #d4d4d8; }
+    .quote-text mark { color: #fff; }
+  </style>
+</head>
+<body class="min-h-screen">
+  <div class="max-w-6xl mx-auto px-4 py-8">
+    <!-- Header -->
+    <header class="flex items-center justify-between mb-8">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-lg bg-yt flex items-center justify-center shadow-lg shadow-yt/20">
+          <svg viewBox="0 0 24 24" class="w-6 h-6 text-white" fill="currentColor">
+            <path d="M8 5v14l11-7z"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-2xl font-semibold tracking-tight">yt-channel-search</h1>
+          <p class="text-sm text-neutral-400">Full-text search across a YouTube channel's transcripts.</p>
+        </div>
+      </div>
+      <div id="totals" class="text-right text-xs text-neutral-400">
+        <div><span id="total-videos">0</span> videos</div>
+        <div><span id="total-segments">0</span> segments</div>
+      </div>
+    </header>
+
+    <!-- Admin sign-in (shown when server requires auth and we have no password stored) -->
+    <section id="admin-signin" class="bg-panel border border-edge rounded-xl p-5 mb-6 hidden">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-medium">Admin sign-in</h2>
+        <span class="text-xs text-neutral-500">Required to ingest, transcribe, or upload DB</span>
+      </div>
+      <form id="signin-form" class="flex gap-2">
+        <input
+          id="admin-password"
+          type="password"
+          placeholder="Admin password"
+          class="flex-1 bg-ink border border-edge rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-yt/60 focus:ring-1 focus:ring-yt/40"
+          autocomplete="current-password"
+        />
+        <button
+          type="submit"
+          class="bg-yt hover:bg-yt/90 text-white font-medium text-sm px-5 py-2.5 rounded-lg"
+        >
+          Sign in
+        </button>
+      </form>
+      <div id="signin-error" class="text-xs text-red-400 mt-2 hidden"></div>
+    </section>
+
+    <!-- Ingest panel -->
+    <section id="ingest-panel" class="bg-panel border border-edge rounded-xl p-5 mb-6 hidden">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-3">
+          <h2 class="font-medium">Index a source</h2>
+          <div class="flex bg-ink border border-edge rounded-lg overflow-hidden text-xs">
+            <button type="button" data-mode="youtube" class="mode-tab px-3 py-1.5 bg-edge text-neutral-100">YouTube</button>
+            <button type="button" data-mode="podcast" class="mode-tab px-3 py-1.5 text-neutral-400">Podcast (RSS)</button>
+          </div>
+        </div>
+        <div class="flex items-center gap-3">
+          <div id="ingest-status" class="text-xs text-neutral-400"></div>
+          <button id="signout-btn" type="button" class="text-xs text-neutral-500 hover:text-red-400 transition hidden">Sign out</button>
+        </div>
+      </div>
+      <form id="ingest-form" class="flex gap-2">
+        <input
+          id="ingest-url"
+          type="text"
+          placeholder="https://www.youtube.com/@SomeChannel  or  @handle  or  UC..."
+          class="flex-1 bg-ink border border-edge rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-yt/60 focus:ring-1 focus:ring-yt/40"
+          autocomplete="off"
+        />
+        <button
+          id="ingest-btn"
+          type="submit"
+          class="bg-yt hover:bg-yt/90 active:bg-yt/80 text-white font-medium text-sm px-5 py-2.5 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition"
+        >
+          Index
+        </button>
+      </form>
+      <div
+        id="log"
+        class="log hidden mt-4 h-52 overflow-y-auto scroll-thin bg-ink border border-edge rounded-lg p-3 whitespace-pre-wrap leading-relaxed"
+      ></div>
+    </section>
+
+    <!-- Read-only notice -->
+    <section id="readonly-banner" class="bg-panel border border-edge rounded-xl p-4 mb-6 hidden">
+      <div class="text-sm text-neutral-300">
+        This instance is in <span class="text-amber-400">read-only</span> mode. Search only.
+      </div>
+    </section>
+
+    <!-- Search panel -->
+    <section class="bg-panel border border-edge rounded-xl p-5 mb-6">
+      <div class="flex flex-col sm:flex-row gap-2">
+        <input
+          id="q"
+          type="text"
+          placeholder="Search transcripts… (min 3 characters)"
+          class="flex-1 bg-ink border border-edge rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-yt/60 focus:ring-1 focus:ring-yt/40"
+          autocomplete="off"
+        />
+        <select
+          id="channel-filter"
+          class="bg-ink border border-edge rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-yt/60 sm:w-64"
+        >
+          <option value="">All channels</option>
+        </select>
+      </div>
+      <div id="search-status" class="text-xs text-neutral-500 mt-2 h-4"></div>
+    </section>
+
+    <!-- Sticky player (single, swaps videos on click) -->
+    <div id="player-wrap" class="sticky top-2 z-30 mb-6 hidden">
+      <div class="bg-panel border border-edge rounded-xl overflow-hidden shadow-2xl shadow-black/40">
+        <div id="player-slot" class="bg-black"></div>
+        <div class="flex items-center justify-between gap-3 px-4 py-2.5">
+          <div class="min-w-0">
+            <div class="text-[11px] uppercase tracking-wide text-neutral-500">Now playing</div>
+            <a id="player-title" href="#" target="_blank" rel="noopener"
+               class="block text-sm text-neutral-100 hover:text-yt transition truncate"></a>
+          </div>
+          <button id="player-close"
+            class="text-xs text-neutral-500 hover:text-red-400 transition shrink-0">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <section>
+      <div id="results-summary" class="text-sm text-neutral-300 mb-4 hidden"></div>
+      <div id="results" class="space-y-4"></div>
+      <div id="empty" class="text-center text-neutral-500 text-sm py-12 hidden">
+        No results. Try different terms.
+      </div>
+    </section>
+
+    <!-- Indexed channels list -->
+    <section class="mt-10">
+      <h2 class="text-sm font-medium text-neutral-400 mb-3">Indexed channels</h2>
+      <div id="channels-list" class="space-y-2"></div>
+    </section>
+
+    <footer class="mt-12 pt-6 border-t border-edge text-xs text-neutral-500 flex justify-between">
+      <div>yt-channel-search · SQLite FTS5</div>
+      <div><span id="footer-videos">0</span> videos · <span id="footer-segments">0</span> segments indexed</div>
+    </footer>
+  </div>
+
+  <script>
+    const $ = sel => document.querySelector(sel);
+    const resultsEl = $('#results');
+    const summaryEl = $('#results-summary');
+    const emptyEl = $('#empty');
+    const logEl = $('#log');
+    const ingestStatus = $('#ingest-status');
+    const ingestBtn = $('#ingest-btn');
+    const qEl = $('#q');
+    const channelFilterEl = $('#channel-filter');
+    const searchStatusEl = $('#search-status');
+
+    // ----- Config + auth -----
+    let SERVER_CONFIG = { read_only: false, admin_required: false };
+    let ingestMode = 'youtube';
+    const AUTH_KEY = 'yt-search-admin-pw';
+
+    function getAuthHeader() {
+      const pw = localStorage.getItem(AUTH_KEY);
+      if (!pw) return null;
+      return 'Basic ' + btoa('admin:' + pw);
+    }
+
+    function authedFetch(url, opts = {}) {
+      const headers = { ...(opts.headers || {}) };
+      const auth = getAuthHeader();
+      if (auth) headers['Authorization'] = auth;
+      return fetch(url, { ...opts, headers });
+    }
+
+    async function loadConfig() {
+      try {
+        const res = await fetch('/api/config');
+        SERVER_CONFIG = await res.json();
+      } catch {}
+      applyConfigToUI();
+    }
+
+    function applyConfigToUI() {
+      const readOnly = !!SERVER_CONFIG.read_only;
+      const adminRequired = !!SERVER_CONFIG.admin_required;
+      const hasAuth = !!localStorage.getItem(AUTH_KEY);
+
+      $('#readonly-banner').classList.toggle('hidden', !readOnly);
+
+      if (readOnly) {
+        $('#ingest-panel').classList.add('hidden');
+        $('#admin-signin').classList.add('hidden');
+        return;
+      }
+      if (adminRequired && !hasAuth) {
+        $('#ingest-panel').classList.add('hidden');
+        $('#admin-signin').classList.remove('hidden');
+      } else {
+        $('#ingest-panel').classList.remove('hidden');
+        $('#admin-signin').classList.add('hidden');
+        $('#signout-btn').classList.toggle('hidden', !adminRequired);
+      }
+    }
+
+    function adminEnabled() {
+      if (SERVER_CONFIG.read_only) return false;
+      if (SERVER_CONFIG.admin_required && !localStorage.getItem(AUTH_KEY)) return false;
+      return true;
+    }
+
+    $('#signin-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const pw = $('#admin-password').value;
+      if (!pw) return;
+      const errEl = $('#signin-error');
+      errEl.classList.add('hidden');
+      const check = await fetch('/api/admin/check', {
+        headers: { Authorization: 'Basic ' + btoa('admin:' + pw) },
+      });
+      if (!check.ok) {
+        errEl.textContent = 'Invalid password';
+        errEl.classList.remove('hidden');
+        return;
+      }
+      localStorage.setItem(AUTH_KEY, pw);
+      $('#admin-password').value = '';
+      applyConfigToUI();
+      loadChannels();
+    });
+
+    $('#signout-btn').addEventListener('click', () => {
+      localStorage.removeItem(AUTH_KEY);
+      applyConfigToUI();
+      loadChannels();
+    });
+
+    document.querySelectorAll('.mode-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        ingestMode = btn.dataset.mode;
+        document.querySelectorAll('.mode-tab').forEach(b => {
+          const active = b.dataset.mode === ingestMode;
+          b.classList.toggle('bg-edge', active);
+          b.classList.toggle('text-neutral-100', active);
+          b.classList.toggle('text-neutral-400', !active);
+        });
+        $('#ingest-url').placeholder =
+          ingestMode === 'podcast'
+            ? 'https://example.com/feed.rss  or  ./podcast.rss'
+            : 'https://www.youtube.com/@SomeChannel  or  @handle  or  UC...';
+      });
+    });
+
+    function escapeHtml(s) {
+      return (s || '').replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[c]));
+    }
+
+    function highlight(text, query) {
+      if (!text) return '';
+      const safe = escapeHtml(text);
+      if (!query) return safe;
+      const terms = query.trim().split(/\s+/).filter(Boolean).map(t =>
+        t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      );
+      if (!terms.length) return safe;
+      const re = new RegExp('(' + terms.join('|') + ')', 'gi');
+      return safe.replace(re, '<mark>$1</mark>');
+    }
+
+    function logLine(line, cls = 'text-neutral-300') {
+      const div = document.createElement('div');
+      div.className = cls;
+      div.textContent = line;
+      logEl.appendChild(div);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    // ----- Ingest -----
+    async function streamNdjson(res, onEvent) {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let evt;
+          try { evt = JSON.parse(line); } catch { continue; }
+          onEvent(evt);
+        }
+      }
+    }
+
+    $('#ingest-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const url = $('#ingest-url').value.trim();
+      if (!url) return;
+
+      logEl.classList.remove('hidden');
+      logEl.innerHTML = '';
+      ingestBtn.disabled = true;
+      ingestStatus.textContent = 'Working…';
+
+      const endpoint = ingestMode === 'podcast' ? '/api/ingest-podcast' : '/api/ingest';
+      const body = ingestMode === 'podcast' ? { rssUrl: url } : { channelUrl: url };
+
+      try {
+        const res = await authedFetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok || !res.body) {
+          const txt = await res.text().catch(() => '');
+          logLine('HTTP ' + res.status + ' ' + txt, 'text-red-400');
+          return;
+        }
+
+        await streamNdjson(res, handleIngestEvent);
+      } catch (err) {
+        logLine('Error: ' + err.message, 'text-red-400');
+      } finally {
+        ingestBtn.disabled = false;
+        ingestStatus.textContent = '';
+        loadChannels();
+      }
+    });
+
+    function handleIngestEvent(evt) {
+      switch (evt.type) {
+        case 'status':
+          logLine('• ' + evt.message, 'text-neutral-200');
+          break;
+        case 'indexed':
+          logLine(`✓ ${evt.video_id}  [${evt.segments} segs]  ${evt.title}`, 'text-emerald-400');
+          break;
+        case 'skip':
+          logLine(`↷ ${evt.video_id}  (already indexed)  ${evt.title}`, 'text-neutral-500');
+          break;
+        case 'fail':
+          logLine(`✗ ${evt.video_id}  ${evt.title}  — ${evt.reason}`, 'text-amber-400');
+          break;
+        case 'error':
+          logLine('! ' + evt.message, 'text-red-400');
+          break;
+        case 'done':
+          logLine(`— done. total=${evt.total} indexed=${evt.indexed} skipped=${evt.skipped} failed=${evt.failed}`, 'text-yt');
+          break;
+        default:
+          logLine(JSON.stringify(evt));
+      }
+    }
+
+    // ----- Search -----
+    let searchTimer = null;
+    let lastQuery = '';
+
+    function scheduleSearch() {
+      clearTimeout(searchTimer);
+      const q = qEl.value.trim();
+      if (q.length < 3) {
+        resultsEl.innerHTML = '';
+        emptyEl.classList.add('hidden');
+        searchStatusEl.textContent = q.length ? 'Type at least 3 characters…' : '';
+        return;
+      }
+      searchTimer = setTimeout(runSearch, 300);
+    }
+
+    async function runSearch() {
+      const q = qEl.value.trim();
+      const channelId = channelFilterEl.value;
+      if (q.length < 3) return;
+      lastQuery = q;
+      searchStatusEl.textContent = 'Searching…';
+
+      try {
+        const url = new URL('/api/search', location.origin);
+        url.searchParams.set('q', q);
+        if (channelId) url.searchParams.set('channel_id', channelId);
+        const res = await fetch(url);
+        const data = await res.json();
+        renderResults(data.results || [], q);
+        searchStatusEl.textContent = `${(data.results || []).length} result(s)`;
+      } catch (e) {
+        searchStatusEl.textContent = 'Search failed: ' + e.message;
+      }
+    }
+
+    function groupByVideo(results) {
+      const map = new Map();
+      for (const r of results) {
+        if (!map.has(r.video_id)) {
+          map.set(r.video_id, {
+            video_id: r.video_id,
+            title: r.title,
+            thumbnail_url: r.thumbnail_url,
+            channel_name: r.channel_name,
+            published_at: r.published_at,
+            kind: r.kind || 'youtube',
+            media_url: r.media_url || null,
+            quotes: [],
+          });
+        }
+        map.get(r.video_id).quotes.push(r);
+      }
+      for (const v of map.values()) {
+        v.quotes.sort((a, b) => a.start_seconds - b.start_seconds);
+      }
+      return Array.from(map.values());
+    }
+
+    function externalUrl(v, start = 0) {
+      if (v.kind === 'podcast' && v.media_url) {
+        return `${v.media_url}#t=${start}`;
+      }
+      return `https://www.youtube.com/watch?v=${v.video_id}${start ? '&t=' + start + 's' : ''}`;
+    }
+
+    const playerWrap = $('#player-wrap');
+    const playerSlot = $('#player-slot');
+    const playerTitle = $('#player-title');
+    let currentVideoId = null;
+    let currentKind = null;
+
+    function playMediaAt(item, seconds) {
+      const { video_id, title, kind, media_url } = item;
+      const start = Math.floor(seconds || 0);
+      playerWrap.classList.remove('hidden');
+      playerTitle.textContent = title || video_id;
+
+      if (kind === 'podcast' && media_url) {
+        playerTitle.href = `${media_url}#t=${start}`;
+        if (video_id === currentVideoId && currentKind === 'podcast') {
+          const audio = playerSlot.querySelector('audio');
+          if (audio) {
+            audio.currentTime = start;
+            audio.play().catch(() => {});
+            return;
+          }
+        }
+        currentVideoId = video_id;
+        currentKind = 'podcast';
+        playerSlot.innerHTML = `
+          <audio
+            controls autoplay preload="metadata"
+            class="w-full"
+            src="${escapeHtml(media_url)}#t=${start}"
+          ></audio>
+        `;
+        const audio = playerSlot.querySelector('audio');
+        audio.addEventListener('loadedmetadata', () => {
+          try { audio.currentTime = start; audio.play().catch(() => {}); } catch {}
+        }, { once: true });
+        return;
+      }
+
+      playerTitle.href = `https://www.youtube.com/watch?v=${video_id}&t=${start}s`;
+      if (video_id === currentVideoId && currentKind === 'youtube') {
+        const iframe = playerSlot.querySelector('iframe');
+        if (iframe && iframe.contentWindow) {
+          iframe.contentWindow.postMessage(
+            JSON.stringify({ event: 'command', func: 'seekTo', args: [start, true] }),
+            'https://www.youtube.com'
+          );
+          iframe.contentWindow.postMessage(
+            JSON.stringify({ event: 'command', func: 'playVideo', args: [] }),
+            'https://www.youtube.com'
+          );
+          return;
+        }
+      }
+      currentVideoId = video_id;
+      currentKind = 'youtube';
+      playerSlot.innerHTML = `
+        <iframe
+          class="player-frame"
+          src="https://www.youtube.com/embed/${encodeURIComponent(video_id)}?enablejsapi=1&autoplay=1&start=${start}"
+          title="YouTube player"
+          frameborder="0"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowfullscreen
+        ></iframe>
+      `;
+    }
+
+    $('#player-close').addEventListener('click', () => {
+      playerSlot.innerHTML = '';
+      playerWrap.classList.add('hidden');
+      currentVideoId = null;
+      currentKind = null;
+    });
+
+    function renderResults(results, query) {
+      resultsEl.innerHTML = '';
+      if (!results.length) {
+        emptyEl.classList.remove('hidden');
+        summaryEl.classList.add('hidden');
+        return;
+      }
+      emptyEl.classList.add('hidden');
+
+      const videos = groupByVideo(results);
+      const totalQuotes = results.length;
+      summaryEl.textContent = `Found ${totalQuotes} quote${totalQuotes === 1 ? '' : 's'} in ${videos.length} video${videos.length === 1 ? '' : 's'}`;
+      summaryEl.classList.remove('hidden');
+
+      for (const v of videos) {
+        const card = document.createElement('div');
+        card.className = 'bg-panel border border-edge rounded-xl overflow-hidden';
+        card.dataset.videoId = v.video_id;
+
+        const firstStart = v.quotes[0]?.start_seconds_floor || 0;
+        const watchUrl = externalUrl(v, 0);
+        const isPodcast = v.kind === 'podcast';
+
+        const thumbInner = v.thumbnail_url
+          ? `<img src="${escapeHtml(v.thumbnail_url)}" alt="" loading="lazy"
+                class="absolute inset-0 w-full h-full object-cover"
+                onerror="this.style.display='none'" />`
+          : `<div class="absolute inset-0 bg-gradient-to-br from-neutral-800 to-neutral-900"></div>`;
+
+        const iconSvg = isPodcast
+          ? `<svg viewBox="0 0 24 24" class="w-5 h-5 text-white" fill="currentColor"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>`
+          : `<svg viewBox="0 0 24 24" class="w-5 h-5 text-white" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`;
+
+        card.innerHTML = `
+          <div class="p-4 flex gap-4">
+            <button type="button" data-play-thumb
+              class="relative shrink-0 w-40 sm:w-48 aspect-video rounded-lg overflow-hidden bg-black group">
+              ${thumbInner}
+              <div class="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/40 transition">
+                <div class="w-11 h-11 rounded-full bg-yt/95 flex items-center justify-center shadow-lg">
+                  ${iconSvg}
+                </div>
+              </div>
+              ${isPodcast ? '<div class="absolute top-1.5 left-1.5 text-[10px] uppercase tracking-wide bg-black/70 text-neutral-200 px-1.5 py-0.5 rounded">podcast</div>' : ''}
+            </button>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <a href="${watchUrl}" target="_blank" rel="noopener"
+                     class="block text-sm font-medium text-neutral-100 hover:text-yt transition line-clamp-2">
+                    ${escapeHtml(v.title)}
+                  </a>
+                  <div class="text-xs text-neutral-500 mt-0.5 truncate">
+                    ${escapeHtml(v.channel_name || '')}${v.published_at ? ' · ' + escapeHtml((v.published_at || '').slice(0, 10)) : ''}
+                  </div>
+                </div>
+                <div class="text-xs text-neutral-500 whitespace-nowrap pt-0.5">
+                  ${v.quotes.length} quote${v.quotes.length === 1 ? '' : 's'}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div data-quotes class="px-3 pb-3 divide-y divide-edge/60"></div>
+        `;
+
+        const quotesEl = card.querySelector('[data-quotes]');
+        for (const q of v.quotes) {
+          const row = document.createElement('div');
+          row.className = 'quote-row';
+          row.innerHTML = `
+            <a class="ts-link" data-seek="${q.start_seconds_floor}"
+               href="${externalUrl(v, q.start_seconds_floor)}"
+               target="_blank" rel="noopener">${escapeHtml(q.timestamp)}</a>
+            <div class="quote-text">${highlight(q.text, query)}</div>
+          `;
+          quotesEl.appendChild(row);
+        }
+
+        card.querySelector('[data-play-thumb]').addEventListener('click', () => {
+          playMediaAt(v, firstStart);
+        });
+
+        card.addEventListener('click', (e) => {
+          const ts = e.target.closest('[data-seek]');
+          if (!ts) return;
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+          e.preventDefault();
+          playMediaAt(v, Number(ts.dataset.seek));
+        });
+
+        resultsEl.appendChild(card);
+      }
+    }
+
+    qEl.addEventListener('input', scheduleSearch);
+    channelFilterEl.addEventListener('change', () => {
+      if (qEl.value.trim().length >= 3) runSearch();
+    });
+
+    // ----- Channels / totals -----
+    async function loadChannels() {
+      try {
+        const res = await fetch('/api/channels');
+        const data = await res.json();
+        renderChannels(data.channels || [], data.totals || { videos: 0, segments: 0 });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function renderChannels(channels, totals) {
+      $('#total-videos').textContent = totals.videos || 0;
+      $('#total-segments').textContent = totals.segments || 0;
+      $('#footer-videos').textContent = totals.videos || 0;
+      $('#footer-segments').textContent = totals.segments || 0;
+
+      const currentVal = channelFilterEl.value;
+      channelFilterEl.innerHTML = '<option value="">All channels</option>';
+      for (const c of channels) {
+        const opt = document.createElement('option');
+        opt.value = c.channel_id;
+        opt.textContent = `${c.channel_name} (${c.video_count})`;
+        channelFilterEl.appendChild(opt);
+      }
+      if (currentVal) channelFilterEl.value = currentVal;
+
+      const list = $('#channels-list');
+      list.innerHTML = '';
+      if (!channels.length) {
+        list.innerHTML =
+          '<div class="text-xs text-neutral-600">No channels indexed yet.</div>';
+        return;
+      }
+      for (const c of channels) {
+        const failCount = Number(c.fail_count || 0);
+        const transcribingCount = Number(c.transcribing_count || 0);
+        const row = document.createElement('div');
+        row.className =
+          'flex items-center justify-between gap-3 bg-panel border border-edge rounded-lg px-4 py-2.5 text-sm';
+        const label = c.kind === 'podcast' ? 'episodes' : 'videos';
+        const subParts = [`${c.video_count} ${label}`, `${c.segment_count} segments`];
+        if (failCount) subParts.push(`<span class="text-amber-400">${failCount} missing transcript</span>`);
+        if (transcribingCount) subParts.push(`<span class="text-blue-400">${transcribingCount} transcribing…</span>`);
+        const canWrite = adminEnabled();
+        const kindBadge = c.kind === 'podcast'
+          ? '<span class="text-[10px] uppercase tracking-wide bg-edge text-neutral-300 px-1.5 py-0.5 rounded">podcast</span>'
+          : '';
+        row.innerHTML = `
+          <div class="min-w-0">
+            <div class="text-neutral-100 truncate flex items-center gap-2">
+              ${kindBadge}
+              <span class="truncate">${escapeHtml(c.channel_name || '(unknown)')}</span>
+            </div>
+            <div class="text-xs text-neutral-500">${subParts.join(' · ')}</div>
+          </div>
+          <div class="flex items-center gap-3 shrink-0">
+            ${canWrite && failCount ? `<button data-action="transcribe" class="text-xs text-blue-400 hover:text-blue-300 transition">Transcribe missing (${failCount})</button>` : ''}
+            ${canWrite ? '<button data-action="remove" class="text-xs text-neutral-500 hover:text-red-400 transition">Remove</button>' : ''}
+          </div>
+        `;
+
+        const removeBtn = row.querySelector('[data-action="remove"]');
+        if (removeBtn) {
+          removeBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            if (!confirm(`Remove ${c.channel_name} and all its segments?`)) return;
+            await authedFetch('/api/channels/' + encodeURIComponent(c.channel_id), { method: 'DELETE' });
+            loadChannels();
+            if (qEl.value.trim().length >= 3) runSearch();
+          });
+        }
+
+        const transcribeBtn = row.querySelector('[data-action="transcribe"]');
+        if (transcribeBtn) {
+          transcribeBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            runTranscribe(c.channel_id, c.channel_name, transcribeBtn);
+          });
+        }
+
+        list.appendChild(row);
+      }
+    }
+
+    async function runTranscribe(channelId, channelName, btn) {
+      logEl.classList.remove('hidden');
+      logEl.innerHTML = '';
+      logLine(`▶ Transcribing missing videos for ${channelName}…`, 'text-blue-400');
+      const originalLabel = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Working…';
+      ingestStatus.textContent = 'Transcribing…';
+
+      try {
+        const res = await authedFetch('/api/transcribe-missing', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ channel_id: channelId }),
+        });
+        if (!res.ok || !res.body) {
+          const txt = await res.text().catch(() => '');
+          logLine('HTTP ' + res.status + ' ' + txt, 'text-red-400');
+          return;
+        }
+        await streamNdjson(res, handleTranscribeEvent);
+      } catch (err) {
+        logLine('Error: ' + err.message, 'text-red-400');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+        ingestStatus.textContent = '';
+        loadChannels();
+        if (qEl.value.trim().length >= 3) runSearch();
+      }
+    }
+
+    function handleTranscribeEvent(evt) {
+      switch (evt.type) {
+        case 'status':
+          logLine('• ' + evt.message, 'text-neutral-200');
+          break;
+        case 'start':
+          logLine(`▶ ${evt.video_id}  ${evt.title}`, 'text-blue-300');
+          break;
+        case 'progress':
+          logLine(`  · ${evt.message}`, 'text-neutral-500');
+          break;
+        case 'indexed':
+          logLine(`✓ ${evt.video_id}  [${evt.segments} segs, ${evt.elapsed_seconds}s]  ${evt.title}`, 'text-emerald-400');
+          break;
+        case 'fail':
+          logLine(`✗ ${evt.video_id}  ${evt.title}  — ${evt.reason}`, 'text-amber-400');
+          break;
+        case 'error':
+          logLine('! ' + evt.message, 'text-red-400');
+          break;
+        case 'done':
+          logLine(`— done. total=${evt.total} indexed=${evt.indexed} failed=${evt.failed}`, 'text-yt');
+          break;
+        default:
+          logLine(JSON.stringify(evt));
+      }
+    }
+
+    loadConfig().then(loadChannels);
+  </script>
+</body>
+</html>
