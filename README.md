@@ -60,6 +60,43 @@ Behavior summary:
 
 ---
 
+## Running a large local transcription batch
+
+For a channel or podcast feed with a lot of missing transcripts, it's often
+easier to drive Whisper from the command line than through the UI's
+"Transcribe missing" button — it survives your terminal or session closing,
+and you can check progress with `tail` and stop/restart it without losing
+work.
+
+```bash
+npm run transcribe:restart -- <channel_id>   # just one channel
+npm run transcribe:restart                   # every channel with failed videos
+```
+
+Find a channel's ID from `GET /api/channels` or the UI. This:
+
+- Stops any previous run started this way (parent + its `curl`/`ffmpeg`/
+  `whisper-cli` children), tracked via `data/transcribe.pid`.
+- Starts a fresh run in the background, appending to `data/transcribe.log`.
+
+Follow progress with:
+
+```bash
+tail -f data/transcribe.log
+```
+
+**Safe to interrupt and re-run at any time** — `npm run transcribe:restart`
+again, or just kill the PID in `data/transcribe.pid` and stop there. Any
+episode that was mid-transcription when interrupted gets reset from
+`transcribing` back to `fail` on the next startup (see `db.js`) and is simply
+retried from scratch; completed (`ok`) episodes are never reprocessed or
+duplicated.
+
+Once you're happy with the results, sync `data/search.db` up to the server —
+see **Syncing the DB going forward** below.
+
+---
+
 ## Deploying to Fly.io
 
 Fly is a good fit here: Node + native `better-sqlite3` + a persistent volume

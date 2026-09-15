@@ -4,7 +4,8 @@
   "description": "Full-text search across a YouTube channel's transcripts with timestamp deep-links.",
   "type": "module",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "transcribe:restart": "scripts/restart-transcribe.sh"
   },
   "engines": {
     "node": ">=18"

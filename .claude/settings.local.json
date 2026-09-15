@@ -5,7 +5,12 @@
       "Bash(node *)",
       "Bash(npm view *)",
       "Bash(unset YOUTUBE_API_KEY)",
-      "Bash(echo \"exit code: $?\")"
+      "Bash(echo \"exit code: $?\")",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:lucide.dev)"
     ]
   }
 }
