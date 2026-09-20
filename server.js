@@ -6,7 +6,7 @@ import { createWriteStream } from 'node:fs';
 import { rename, unlink, stat } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 
-import { search, getChannels, getTotals, deleteChannel } from './db.js';
+import { search, getChannels, getTotals, deleteChannel, getVideo } from './db.js';
 import { ingestChannel } from './ingest.js';
 import { ingestPodcast } from './ingest-podcast.js';
 import { transcribeMissing } from './transcribe.js';
@@ -170,6 +170,12 @@ app.post('/api/transcribe-missing', requireWritable, async (req, res) => {
   }
 });
 
+app.get('/api/videos/:id', (req, res) => {
+  const video = getVideo(req.params.id);
+  if (!video) return res.status(404).json({ error: 'Not found' });
+  res.json(video);
+});
+
 app.get('/api/channels', (req, res) => {
   try {
     res.json({ channels: getChannels(), totals: getTotals() });
@@ -221,7 +227,21 @@ app.get('/api/admin/check', requireWritable, (req, res) => {
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
-const PORT = Number(process.env.PORT) || 3000;
-app.listen(PORT, () => {
-  console.log(`yt-channel-search listening on http://localhost:${PORT}`);
-});
+const BASE_PORT = Number(process.env.PORT) || 3000;
+const MAX_PORT_ATTEMPTS = 10;
+
+function listen(port, attemptsLeft) {
+  const server = app.listen(port, () => {
+    console.log(`yt-channel-search listening on http://localhost:${port}`);
+  });
+  server.on('error', err => {
+    if (err.code === 'EADDRINUSE' && attemptsLeft > 0) {
+      console.log(`[server] port ${port} in use, trying ${port + 1}`);
+      listen(port + 1, attemptsLeft - 1);
+    } else {
+      throw err;
+    }
+  });
+}
+
+listen(BASE_PORT, MAX_PORT_ATTEMPTS);
