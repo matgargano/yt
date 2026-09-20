@@ -6,7 +6,7 @@ import { createWriteStream } from 'node:fs';
 import { rename, unlink, stat } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 
-import { search, getChannels, getTotals, deleteChannel, getVideo } from './db.js';
+import { search, getChannels, getTotals, deleteChannel, getVideo, getCallsForVideo, searchCalls } from './db.js';
 import { ingestChannel } from './ingest.js';
 import { ingestPodcast } from './ingest-podcast.js';
 import { transcribeMissing } from './transcribe.js';
@@ -148,6 +148,40 @@ app.get('/api/search', (req, res) => {
   }
 });
 
+app.get('/api/search-calls', (req, res) => {
+  const q = (req.query.q || '').toString();
+  const channelId = req.query.channel_id
+    ? req.query.channel_id.toString()
+    : null;
+
+  if (!q.trim()) return res.json({ results: [] });
+
+  try {
+    const rows = searchCalls(q, channelId);
+    const results = rows.map(r => ({
+      video_id: r.video_id,
+      video_title: r.video_title,
+      thumbnail_url: r.thumbnail_url,
+      call_id: r.call_id,
+      title: r.title,
+      summary: r.summary,
+      start_seconds: r.start_seconds,
+      start_seconds_floor: Math.floor(r.start_seconds || 0),
+      end_seconds: r.end_seconds,
+      timestamp: formatTimestamp(r.start_seconds),
+      snippet: r.snippet,
+      published_at: r.published_at,
+      channel_id: r.channel_id,
+      channel_name: r.channel_name,
+      kind: r.kind || 'youtube',
+      media_url: r.media_url || null,
+    }));
+    res.json({ results });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/transcribe-missing', requireWritable, async (req, res) => {
   const body = req.body || {};
   const channelId = body.channel_id || body.channelId || null;
@@ -174,6 +208,10 @@ app.get('/api/videos/:id', (req, res) => {
   const video = getVideo(req.params.id);
   if (!video) return res.status(404).json({ error: 'Not found' });
   res.json(video);
+});
+
+app.get('/api/videos/:id/calls', (req, res) => {
+  res.json({ calls: getCallsForVideo(req.params.id) });
 });
 
 app.get('/api/channels', (req, res) => {

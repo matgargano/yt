@@ -141,6 +141,12 @@
 
     <!-- Search panel -->
     <section class="bg-panel border border-edge rounded-xl p-5 mb-6">
+      <div class="flex items-center gap-2 mb-2">
+        <div class="flex bg-ink border border-edge rounded-lg overflow-hidden text-xs">
+          <button type="button" data-search-mode="transcripts" class="search-mode-tab px-3 py-1.5 bg-edge text-neutral-100">Transcripts</button>
+          <button type="button" data-search-mode="calls" class="search-mode-tab px-3 py-1.5 text-neutral-400">Calls</button>
+        </div>
+      </div>
       <div class="flex flex-col sm:flex-row gap-2">
         <input
           id="q"
@@ -175,6 +181,7 @@
           <button id="player-close"
             class="text-xs text-neutral-500 hover:text-red-400 transition shrink-0">Close</button>
         </div>
+        <div id="player-calls" class="hidden border-t border-edge"></div>
       </div>
     </div>
 
@@ -438,6 +445,46 @@
     // ----- Search -----
     let searchTimer = null;
     let lastQuery = '';
+    let searchMode = 'transcripts';
+
+    function setSearchMode(mode) {
+      searchMode = mode === 'calls' ? 'calls' : 'transcripts';
+      document.querySelectorAll('.search-mode-tab').forEach(b => {
+        const active = b.dataset.searchMode === searchMode;
+        b.classList.toggle('bg-edge', active);
+        b.classList.toggle('text-neutral-100', active);
+        b.classList.toggle('text-neutral-400', !active);
+      });
+      qEl.placeholder = searchMode === 'calls'
+        ? 'Search call titles/descriptions… (min 3 characters)'
+        : 'Search transcripts… (min 3 characters)';
+    }
+
+    document.querySelectorAll('.search-mode-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        setSearchMode(btn.dataset.searchMode);
+        updateUrl({ mode: searchMode === 'calls' ? 'calls' : null });
+        if (qEl.value.trim().length >= 3) runSearch();
+      });
+    });
+
+    function normalizeCallResult(r) {
+      return {
+        video_id: r.video_id,
+        title: r.video_title,
+        thumbnail_url: r.thumbnail_url,
+        published_at: r.published_at,
+        channel_id: r.channel_id,
+        channel_name: r.channel_name,
+        kind: r.kind,
+        media_url: r.media_url,
+        start_seconds: r.start_seconds,
+        start_seconds_floor: r.start_seconds_floor,
+        timestamp: r.timestamp,
+        text: r.summary ? `${r.title} — ${r.summary}` : r.title,
+        snippet: r.snippet || escapeHtml(r.title),
+      };
+    }
 
     function scheduleSearch() {
       clearTimeout(searchTimer);
@@ -458,16 +505,18 @@
       if (q.length < 3) return;
       lastQuery = q;
       searchStatusEl.textContent = 'Searching…';
-      updateUrl({ q, channel_id: channelId || null });
+      updateUrl({ q, channel_id: channelId || null, mode: searchMode === 'calls' ? 'calls' : null });
 
       try {
-        const url = new URL('/api/search', location.origin);
+        const endpoint = searchMode === 'calls' ? '/api/search-calls' : '/api/search';
+        const url = new URL(endpoint, location.origin);
         url.searchParams.set('q', q);
         if (channelId) url.searchParams.set('channel_id', channelId);
         const res = await fetch(url);
         const data = await res.json();
-        renderResults(data.results || [], q);
-        searchStatusEl.textContent = `${(data.results || []).length} result(s)`;
+        const results = (data.results || []).map(searchMode === 'calls' ? normalizeCallResult : r => r);
+        renderResults(results, q);
+        searchStatusEl.textContent = `${results.length} result(s)`;
       } catch (e) {
         searchStatusEl.textContent = 'Search failed: ' + e.message;
       }
@@ -506,10 +555,61 @@
     const playerWrap = $('#player-wrap');
     const playerSlot = $('#player-slot');
     const playerTitle = $('#player-title');
+    const playerCallsEl = $('#player-calls');
     let currentVideoId = null;
     let currentKind = null;
+    let currentItem = null;
 
     const autoplayNote = $('#player-autoplay-note');
+
+    function fmtTime(totalSeconds) {
+      const s = Math.floor(Number(totalSeconds) || 0);
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      const sec = s % 60;
+      const pad = n => String(n).padStart(2, '0');
+      return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
+    }
+
+    function renderPlayerCalls(calls) {
+      if (!calls.length) {
+        playerCallsEl.classList.add('hidden');
+        playerCallsEl.innerHTML = '';
+        return;
+      }
+      playerCallsEl.classList.remove('hidden');
+      playerCallsEl.innerHTML = `
+        <div class="text-[11px] uppercase tracking-wide text-neutral-500 px-4 pt-3 pb-1">Calls in this episode</div>
+        <div class="max-h-48 overflow-y-auto scroll-thin px-1 pb-2">
+          ${calls.map(c => `
+            <button type="button" data-call-seek="${Math.floor(c.start_seconds)}"
+              class="w-full text-left px-3 py-1.5 hover:bg-white/5 rounded-lg flex gap-3 items-baseline">
+              <span class="ts-link shrink-0">${fmtTime(c.start_seconds)}</span>
+              <span class="text-sm text-neutral-200 truncate">${escapeHtml(c.title)}</span>
+            </button>
+          `).join('')}
+        </div>
+      `;
+      playerCallsEl.querySelectorAll('[data-call-seek]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          if (currentItem) playMediaAt(currentItem, Number(btn.dataset.callSeek));
+        });
+      });
+    }
+
+    let callsLoadedForVideoId = null;
+
+    async function loadCallsForPlayer(videoId) {
+      if (callsLoadedForVideoId === videoId) return;
+      callsLoadedForVideoId = videoId;
+      try {
+        const res = await fetch('/api/videos/' + encodeURIComponent(videoId) + '/calls');
+        const data = await res.json();
+        renderPlayerCalls(data.calls || []);
+      } catch {
+        playerCallsEl.classList.add('hidden');
+      }
+    }
 
     function tryPlay(mediaEl) {
       const p = mediaEl.play();
@@ -524,10 +624,12 @@
     function playMediaAt(item, seconds) {
       const { video_id, title, kind, media_url } = item;
       const start = Math.floor(seconds || 0);
+      currentItem = item;
       updateUrl({ v: video_id, t: start });
       playerWrap.classList.remove('hidden');
       playerTitle.textContent = title || video_id;
       autoplayNote.classList.add('hidden');
+      loadCallsForPlayer(video_id);
 
       if (kind === 'podcast' && media_url) {
         playerTitle.href = `${media_url}#t=${start}`;
@@ -589,6 +691,10 @@
       playerWrap.classList.add('hidden');
       currentVideoId = null;
       currentKind = null;
+      currentItem = null;
+      callsLoadedForVideoId = null;
+      playerCallsEl.classList.add('hidden');
+      playerCallsEl.innerHTML = '';
       updateUrl({ v: null, t: null });
     });
 
@@ -877,6 +983,7 @@
       const params = new URLSearchParams(location.search);
       const q = params.get('q');
       const channelId = params.get('channel_id') || '';
+      setSearchMode(params.get('mode') === 'calls' ? 'calls' : 'transcripts');
       if (!q) return;
       qEl.value = q;
       runSearch(q, channelId);

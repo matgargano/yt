@@ -53,6 +53,38 @@ db.exec(`
     INSERT INTO segments_fts(segments_fts, rowid, text) VALUES ('delete', old.id, old.text);
     INSERT INTO segments_fts(rowid, text) VALUES (new.id, new.text);
   END;
+
+  CREATE TABLE IF NOT EXISTS calls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id TEXT NOT NULL,
+    start_seconds REAL NOT NULL,
+    end_seconds REAL,
+    title TEXT NOT NULL,
+    summary TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_calls_video ON calls(video_id);
+
+  CREATE VIRTUAL TABLE IF NOT EXISTS calls_fts USING fts5(
+    title,
+    summary,
+    content='calls',
+    content_rowid='id',
+    tokenize='porter unicode61'
+  );
+
+  CREATE TRIGGER IF NOT EXISTS calls_ai AFTER INSERT ON calls BEGIN
+    INSERT INTO calls_fts(rowid, title, summary) VALUES (new.id, new.title, new.summary);
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS calls_ad AFTER DELETE ON calls BEGIN
+    INSERT INTO calls_fts(calls_fts, rowid, title, summary) VALUES ('delete', old.id, old.title, old.summary);
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS calls_au AFTER UPDATE ON calls BEGIN
+    INSERT INTO calls_fts(calls_fts, rowid, title, summary) VALUES ('delete', old.id, old.title, old.summary);
+    INSERT INTO calls_fts(rowid, title, summary) VALUES (new.id, new.title, new.summary);
+  END;
 `);
 
 const existingCols = new Set(
@@ -207,6 +239,82 @@ export function search(query, channelId = null) {
     JOIN segments s ON s.id = f.rowid
     JOIN videos   v ON v.id = s.video_id
     WHERE segments_fts MATCH ?
+  `;
+  if (channelId) {
+    sql += ' AND v.channel_id = ?';
+    params.push(channelId);
+  }
+  sql += ' ORDER BY rank LIMIT 300';
+
+  return db.prepare(sql).all(...params);
+}
+
+export function getSegmentsForVideo(videoId) {
+  return db
+    .prepare('SELECT start_seconds, text FROM segments WHERE video_id = ? ORDER BY start_seconds')
+    .all(videoId);
+}
+
+const deleteCallsForVideoStmt = db.prepare('DELETE FROM calls WHERE video_id = ?');
+
+export function deleteCallsForVideo(videoId) {
+  deleteCallsForVideoStmt.run(videoId);
+}
+
+const insertCallStmt = db.prepare(`
+  INSERT INTO calls (video_id, start_seconds, end_seconds, title, summary)
+  VALUES (@video_id, @start_seconds, @end_seconds, @title, @summary)
+`);
+
+const insertCallsTx = db.transaction((videoId, calls) => {
+  deleteCallsForVideoStmt.run(videoId);
+  for (const c of calls) {
+    insertCallStmt.run({
+      video_id: videoId,
+      start_seconds: c.start_seconds,
+      end_seconds: c.end_seconds ?? null,
+      title: c.title,
+      summary: c.summary ?? null,
+    });
+  }
+});
+
+export function insertCalls(videoId, calls) {
+  insertCallsTx(videoId, calls);
+}
+
+export function getCallsForVideo(videoId) {
+  return db
+    .prepare('SELECT id, video_id, start_seconds, end_seconds, title, summary FROM calls WHERE video_id = ? ORDER BY start_seconds')
+    .all(videoId);
+}
+
+export function searchCalls(query, channelId = null) {
+  if (!query || !query.trim()) return [];
+  const ftsQuery = buildFtsQuery(query);
+  if (!ftsQuery) return [];
+
+  const params = [ftsQuery];
+  let sql = `
+    SELECT
+      v.id          AS video_id,
+      v.title       AS video_title,
+      v.thumbnail_url,
+      v.published_at,
+      v.channel_id,
+      v.channel_name,
+      v.kind,
+      v.media_url,
+      c.id          AS call_id,
+      c.start_seconds,
+      c.end_seconds,
+      c.title,
+      c.summary,
+      snippet(calls_fts, 0, '<mark>', '</mark>', '…', 24) AS snippet
+    FROM calls_fts f
+    JOIN calls  c ON c.id = f.rowid
+    JOIN videos v ON v.id = c.video_id
+    WHERE calls_fts MATCH ?
   `;
   if (channelId) {
     sql += ' AND v.channel_id = ?';
