@@ -452,9 +452,9 @@
       searchTimer = setTimeout(runSearch, 300);
     }
 
-    async function runSearch() {
-      const q = qEl.value.trim();
-      const channelId = channelFilterEl.value;
+    async function runSearch(qArg, channelArg) {
+      const q = (qArg !== undefined ? qArg : qEl.value).trim();
+      const channelId = channelArg !== undefined ? channelArg : channelFilterEl.value;
       if (q.length < 3) return;
       lastQuery = q;
       searchStatusEl.textContent = 'Searching…';
@@ -876,15 +876,20 @@
     function restoreSearchFromUrl() {
       const params = new URLSearchParams(location.search);
       const q = params.get('q');
-      const channelId = params.get('channel_id');
-      if (channelId) channelFilterEl.value = channelId;
-      if (q) {
-        qEl.value = q;
-        runSearch();
-      }
+      const channelId = params.get('channel_id') || '';
+      if (!q) return;
+      qEl.value = q;
+      runSearch(q, channelId);
     }
 
-    loadConfig().then(loadChannels).then(restoreSearchFromUrl);
+    // Runs the actual search immediately, in parallel with config/channels --
+    // those are only needed to populate the <select>'s options, so the
+    // channel filter's *visual* selection is synced separately once ready.
+    loadConfig().then(loadChannels).then(() => {
+      const channelId = new URLSearchParams(location.search).get('channel_id');
+      if (channelId) channelFilterEl.value = channelId;
+    });
+    restoreSearchFromUrl();
     tryRestoreFromUrl();
   </script>
 </body>
