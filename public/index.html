@@ -824,27 +824,45 @@
       }
     }
 
+    function showPlayerLoading() {
+      playerWrap.classList.remove('hidden');
+      playerTitle.textContent = 'Loading shared link…';
+      playerTitle.removeAttribute('href');
+      autoplayNote.classList.add('hidden');
+      playerSlot.innerHTML = `
+        <div class="aspect-video w-full flex items-center justify-center gap-2 text-neutral-500 text-sm">
+          <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.4 0 0 5.4 0 12h4z"/>
+          </svg>
+          Waking up the server — this can take up to ~10s if it's been idle…
+        </div>
+      `;
+    }
+
     async function tryRestoreFromUrl() {
       const params = new URLSearchParams(location.search);
       const videoId = params.get('v');
       if (!videoId) return;
       const seconds = Number(params.get('t') || 0);
-      searchStatusEl.textContent = 'Loading shared link…';
+      showPlayerLoading();
       try {
         const res = await fetch('/api/videos/' + encodeURIComponent(videoId));
         if (!res.ok) {
-          searchStatusEl.textContent = 'That link points to a video that no longer exists.';
+          playerTitle.textContent = 'Not found';
+          playerSlot.innerHTML = '<div class="p-4 text-sm text-neutral-500">That link points to a video that no longer exists.</div>';
           return;
         }
         const video = await res.json();
-        searchStatusEl.textContent = '';
         playMediaAt({ ...video, video_id: video.id }, seconds);
       } catch (e) {
-        searchStatusEl.textContent = 'Failed to load shared link: ' + e.message;
+        playerTitle.textContent = 'Error';
+        playerSlot.innerHTML = `<div class="p-4 text-sm text-red-400">Failed to load shared link: ${escapeHtml(e.message)}</div>`;
       }
     }
 
-    loadConfig().then(loadChannels).then(tryRestoreFromUrl);
+    loadConfig().then(loadChannels);
+    tryRestoreFromUrl();
   </script>
 </body>
 </html>
