@@ -123,6 +123,15 @@ export function deleteSegmentsForVideo(videoId) {
   deleteSegmentsForVideoStmt.run(videoId);
 }
 
+const getVideoStmt = db.prepare(`
+  SELECT id, title, channel_id, channel_name, published_at, thumbnail_url, kind, media_url
+  FROM videos WHERE id = ?
+`);
+
+export function getVideo(id) {
+  return getVideoStmt.get(id);
+}
+
 export function getFailedVideos({ channelId = null, videoIds = null } = {}) {
   if (videoIds && videoIds.length) {
     const placeholders = videoIds.map(() => '?').join(',');

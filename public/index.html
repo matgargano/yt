@@ -481,6 +481,13 @@
       return `https://www.youtube.com/watch?v=${v.video_id}${start ? '&t=' + start + 's' : ''}`;
     }
 
+    function buildDeepLink(videoId, seconds) {
+      const url = new URL(location.pathname, location.origin);
+      url.searchParams.set('v', videoId);
+      url.searchParams.set('t', Math.floor(seconds || 0));
+      return url.toString();
+    }
+
     const playerWrap = $('#player-wrap');
     const playerSlot = $('#player-slot');
     const playerTitle = $('#player-title');
@@ -490,6 +497,7 @@
     function playMediaAt(item, seconds) {
       const { video_id, title, kind, media_url } = item;
       const start = Math.floor(seconds || 0);
+      history.replaceState(null, '', buildDeepLink(video_id, start));
       playerWrap.classList.remove('hidden');
       playerTitle.textContent = title || video_id;
 
@@ -553,6 +561,7 @@
       playerWrap.classList.add('hidden');
       currentVideoId = null;
       currentKind = null;
+      history.replaceState(null, '', location.pathname);
     });
 
     function renderResults(results, query) {
@@ -626,7 +635,7 @@
           row.className = 'quote-row';
           row.innerHTML = `
             <a class="ts-link" data-seek="${q.start_seconds_floor}"
-               href="${externalUrl(v, q.start_seconds_floor)}"
+               href="${buildDeepLink(v.video_id, q.start_seconds_floor)}"
                target="_blank" rel="noopener">${escapeHtml(q.timestamp)}</a>
             <div class="quote-text">${highlight(q.text, query)}</div>
           `;
@@ -799,7 +808,27 @@
       }
     }
 
-    loadConfig().then(loadChannels);
+    async function tryRestoreFromUrl() {
+      const params = new URLSearchParams(location.search);
+      const videoId = params.get('v');
+      if (!videoId) return;
+      const seconds = Number(params.get('t') || 0);
+      searchStatusEl.textContent = 'Loading shared link…';
+      try {
+        const res = await fetch('/api/videos/' + encodeURIComponent(videoId));
+        if (!res.ok) {
+          searchStatusEl.textContent = 'That link points to a video that no longer exists.';
+          return;
+        }
+        const video = await res.json();
+        searchStatusEl.textContent = '';
+        playMediaAt({ ...video, video_id: video.id }, seconds);
+      } catch (e) {
+        searchStatusEl.textContent = 'Failed to load shared link: ' + e.message;
+      }
+    }
+
+    loadConfig().then(loadChannels).then(tryRestoreFromUrl);
   </script>
 </body>
 </html>
