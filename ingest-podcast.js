@@ -4,15 +4,27 @@ import { videoExists, insertVideo } from './db.js';
 
 function decodeEntities(s) {
   if (!s) return '';
-  return s
-    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)));
+  return fixMojibake(
+    s
+      .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+      .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+  );
+}
+
+// Some feeds (Fourble's included) encode a UTF-8 character's individual bytes
+// as separate numeric entities, e.g. a right single quote (U+2019, UTF-8 bytes
+// E2 80 99) shows up as "&#226;&#128;&#153;" -- the three bytes each decoded
+// as their own Latin-1 codepoint. Detect that pattern and repair it.
+function fixMojibake(s) {
+  if (!s || ![...s].every(ch => ch.codePointAt(0) <= 0xff)) return s;
+  const reDecoded = Buffer.from(s, 'latin1').toString('utf8');
+  return reDecoded.includes('�') ? s : reDecoded;
 }
 
 function hash(s) {
