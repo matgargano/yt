@@ -168,6 +168,9 @@
             <div class="text-[11px] uppercase tracking-wide text-neutral-500">Now playing</div>
             <a id="player-title" href="#" target="_blank" rel="noopener"
                class="block text-sm text-neutral-100 hover:text-yt transition truncate"></a>
+            <div id="player-autoplay-note" class="text-xs text-amber-400 mt-0.5 hidden">
+              Autoplay blocked by your browser — press play above.
+            </div>
           </div>
           <button id="player-close"
             class="text-xs text-neutral-500 hover:text-red-400 transition shrink-0">Close</button>
@@ -494,12 +497,25 @@
     let currentVideoId = null;
     let currentKind = null;
 
+    const autoplayNote = $('#player-autoplay-note');
+
+    function tryPlay(mediaEl) {
+      const p = mediaEl.play();
+      if (p && typeof p.catch === 'function') {
+        p.then(() => autoplayNote.classList.add('hidden'))
+         .catch(() => autoplayNote.classList.remove('hidden'));
+      } else {
+        autoplayNote.classList.add('hidden');
+      }
+    }
+
     function playMediaAt(item, seconds) {
       const { video_id, title, kind, media_url } = item;
       const start = Math.floor(seconds || 0);
       history.replaceState(null, '', buildDeepLink(video_id, start));
       playerWrap.classList.remove('hidden');
       playerTitle.textContent = title || video_id;
+      autoplayNote.classList.add('hidden');
 
       if (kind === 'podcast' && media_url) {
         playerTitle.href = `${media_url}#t=${start}`;
@@ -507,7 +523,7 @@
           const audio = playerSlot.querySelector('audio');
           if (audio) {
             audio.currentTime = start;
-            audio.play().catch(() => {});
+            tryPlay(audio);
             return;
           }
         }
@@ -522,7 +538,7 @@
         `;
         const audio = playerSlot.querySelector('audio');
         audio.addEventListener('loadedmetadata', () => {
-          try { audio.currentTime = start; audio.play().catch(() => {}); } catch {}
+          try { audio.currentTime = start; tryPlay(audio); } catch {}
         }, { once: true });
         return;
       }
