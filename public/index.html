@@ -418,6 +418,23 @@
       }
     }
 
+    // ----- URL state -----
+    // Every param (q, channel_id, v, t) merges onto whatever's already in the
+    // URL, so search context and playback state can coexist in one shareable link.
+    function buildUrl(patch) {
+      const params = new URLSearchParams(location.search);
+      for (const [k, val] of Object.entries(patch)) {
+        if (val === null || val === undefined || val === '') params.delete(k);
+        else params.set(k, val);
+      }
+      const qs = params.toString();
+      return location.pathname + (qs ? '?' + qs : '');
+    }
+
+    function updateUrl(patch) {
+      history.replaceState(null, '', buildUrl(patch));
+    }
+
     // ----- Search -----
     let searchTimer = null;
     let lastQuery = '';
@@ -429,6 +446,7 @@
         resultsEl.innerHTML = '';
         emptyEl.classList.add('hidden');
         searchStatusEl.textContent = q.length ? 'Type at least 3 characters…' : '';
+        updateUrl({ q: null });
         return;
       }
       searchTimer = setTimeout(runSearch, 300);
@@ -440,6 +458,7 @@
       if (q.length < 3) return;
       lastQuery = q;
       searchStatusEl.textContent = 'Searching…';
+      updateUrl({ q, channel_id: channelId || null });
 
       try {
         const url = new URL('/api/search', location.origin);
@@ -484,13 +503,6 @@
       return `https://www.youtube.com/watch?v=${v.video_id}${start ? '&t=' + start + 's' : ''}`;
     }
 
-    function buildDeepLink(videoId, seconds) {
-      const url = new URL(location.pathname, location.origin);
-      url.searchParams.set('v', videoId);
-      url.searchParams.set('t', Math.floor(seconds || 0));
-      return url.toString();
-    }
-
     const playerWrap = $('#player-wrap');
     const playerSlot = $('#player-slot');
     const playerTitle = $('#player-title');
@@ -512,7 +524,7 @@
     function playMediaAt(item, seconds) {
       const { video_id, title, kind, media_url } = item;
       const start = Math.floor(seconds || 0);
-      history.replaceState(null, '', buildDeepLink(video_id, start));
+      updateUrl({ v: video_id, t: start });
       playerWrap.classList.remove('hidden');
       playerTitle.textContent = title || video_id;
       autoplayNote.classList.add('hidden');
@@ -577,7 +589,7 @@
       playerWrap.classList.add('hidden');
       currentVideoId = null;
       currentKind = null;
-      history.replaceState(null, '', location.pathname);
+      updateUrl({ v: null, t: null });
     });
 
     function renderResults(results, query) {
@@ -651,7 +663,7 @@
           row.className = 'quote-row';
           row.innerHTML = `
             <a class="ts-link" data-seek="${q.start_seconds_floor}"
-               href="${buildDeepLink(v.video_id, q.start_seconds_floor)}"
+               href="${buildUrl({ v: v.video_id, t: q.start_seconds_floor })}"
                target="_blank" rel="noopener">${escapeHtml(q.timestamp)}</a>
             <div class="quote-text">${highlight(q.text, query)}</div>
           `;
@@ -861,7 +873,18 @@
       }
     }
 
-    loadConfig().then(loadChannels);
+    function restoreSearchFromUrl() {
+      const params = new URLSearchParams(location.search);
+      const q = params.get('q');
+      const channelId = params.get('channel_id');
+      if (channelId) channelFilterEl.value = channelId;
+      if (q) {
+        qEl.value = q;
+        runSearch();
+      }
+    }
+
+    loadConfig().then(loadChannels).then(restoreSearchFromUrl);
     tryRestoreFromUrl();
   </script>
 </body>
